@@ -1075,6 +1075,9 @@ impl FilmcraftApp {
     /// makes the next scrub grain open the device again, and on WASAPI that open is slow.
     pub fn transport_running(&self) -> bool {
         self.playback.playing
+            // A panel that panicked clears `playing` but leaves the output playing, and the clock
+            // stays on: the press still has that stream to stop.
+            || self.playback.audio_clock
             || self.source_playback.clock.playing
             || self.playback.preroll.is_some()
             || self.session.mixrec.active()
@@ -2606,6 +2609,10 @@ mod audio_recovery_tests {
         app.playback.preroll = Some(0.0);
         assert!(app.transport_running(), "a preroll runs one");
         app.playback.preroll = None;
+        assert!(!app.transport_running());
+        app.playback.audio_clock = true;
+        assert!(app.transport_running(), "an output a panicked frame left playing is stopped too");
+        app.playback.audio_clock = false;
         assert!(!app.transport_running());
     }
 
