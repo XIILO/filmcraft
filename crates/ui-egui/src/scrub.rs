@@ -250,6 +250,31 @@ mod tests {
         buf.iter().map(|s| s.abs()).sum()
     }
 
+    /// #2633: a sequence that becomes active while the scrub stream is open must not keep the fill
+    /// the previous one built (an open stream only moves its grain cursor, it does not mix again):
+    /// the next grain opens it for the sequence that is active now, at the same rate.
+    #[test]
+    fn a_sequence_change_reopens_an_open_scrub_stream() {
+        let mut s = filmcraft_engine::Session::default();
+        s.execute("file.newProject", serde_json::json!({"name": "two"})).unwrap();
+        s.execute("file.newSequence", serde_json::json!({"name": "A", "video": 1, "audio": 1})).unwrap();
+        let first = s.state.active_sequence.unwrap();
+        s.execute("file.newSequence", serde_json::json!({"name": "B", "video": 1, "audio": 1})).unwrap();
+        s.prefs.audio.scrub_audio = true;
+        let mut app = FilmcraftApp::new(s);
+        app.apply_prefs(&egui::Context::default());
+        let fill: Arc<Mutex<Option<Fill>>> = Arc::new(Mutex::new(None));
+        app.audio = Some(Box::new(Out { fill }));
+        let rate = app.session.sequence_rate();
+        app.session.set_playhead(rate.tick_of(48));
+        assert!(!app.scrub_tick(0.0, true), "pressing alone plays nothing");
+        app.session.set_playhead(rate.tick_of(60));
+        assert!(app.scrub_tick(0.02, true), "a move opens the stream");
+        app.session.execute("sequence.open", serde_json::json!({"item": first.0})).unwrap();
+        app.apply_prefs(&egui::Context::default());
+        assert!(!app.scrub.is_open(), "the stream the other sequence opened is not reused");
+    }
+
     /// #211: moving the playhead with the button down plays the sequence's sound at the new spot;
     /// releasing the button closes the stream.
     #[test]
